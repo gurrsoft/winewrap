@@ -57,15 +57,15 @@ lrwxrwxrwx 1 root root 23 Jan 17 23:36 /usr/bin/wine -> /home/bob/.local/bin/win
 - Provide configuration options via GUI (such as WineWrap prefix path for example)?
 
 ## FAQ
-Q: Where are the WineWrap prefixes stored?
-A: WineWrap prefix are in a directory called `.wine_pfxs` in your Home directory.
+Q: Where are the WineWrap prefixes stored?  
+A: WineWrap prefix are in a directory called `.wine_pfxs` in your Home directory.  
 
-Q: Where are the saved prefix selections stored? How can I remove/make WineWrap 'forget' a saved selection?
-A: Each WineWrap prefix directory will have a file named `always.list` created the first time a selection is saved for that prefix. It is a simple text file, you can use you favorite text editor to open the file and remove the corresponding line referencing the executable in question.
+Q: Where are the saved prefix selections stored? How can I remove/make WineWrap 'forget' a saved selection?  
+A: Each WineWrap prefix directory will have a file named `always.list` created the first time a selection is saved for that prefix. It is a simple text file, you can use you favorite text editor to open the file and remove the corresponding line referencing the executable in question.  
 
-Q: I have updated Wine and WineWrap is no longer working, what do I do?
-A: You have to repeat the installation steps to reinstate the symlinks.
+Q: I have updated Wine and WineWrap is no longer working, what do I do?  
+A: You have to repeat the installation steps to reinstate the symlinks.  
 
-Q: WineWrap is not working at all, how can I figure out what is wrong?
-A: Try running WineWrap and your target Windows executable from command-line as `DEBUG=1 wine path/to/your/target.exe` and observe the output for any errors. You can check `winewrap-debug.log` in your home directory after a DEBUG=1 run.
+Q: WineWrap is not working at all, how can I figure out what is wrong?  
+A: Try running WineWrap and your target Windows executable from command-line as `DEBUG=1 wine path/to/your/target.exe` and observe the output for any errors. You can check `winewrap-debug.log` in your home directory after a DEBUG=1 run.  
 
