@@ -1,0 +1,209 @@
+#!/bin/bash
+
+ver="0.3"
+wineprefixes="${HOME}/.wine_pfxs/"
+logfile="${HOME}/winewrap-debug.log"
+
+#***************************************************************************************************
+
+function dcho()
+{
+[[ "${DEBUG:-}" == "1" ]] && echo "$@" | tee -a "$logfile" >&2
+}
+
+#***************************************************************************************************
+
+function askprefix()
+{
+local item exearch temp
+
+prefixes_menu=()
+n=0
+
+exearch="$1"
+
+dcho -n "Looking for viable prefixes"
+[[ "$exearch" != "" ]] && dcho -n " that's $exearch compatible"
+dcho "..."
+
+prefix=""
+while read -rs item; do
+	item="${item##*/}"
+	arch="???"
+	if [[ -f "${wineprefixes}${item}/system.reg" ]]; then
+		arch="$(head -10 "${wineprefixes}${item}/system.reg" | grep '#arch=' | cut -d "=" -f2)"
+	fi
+
+	if [[ -f "${wineprefixes}${item}/always.list" && "${executable//\\/\/}" != "" ]]; then
+		temp="$(grep "${executable//\\/\/}" "${wineprefixes}${item}/always.list")"
+
+		if [[ "$temp" != "" ]]; then
+			dcho "Found executable in 'always' list of prefix: $item"
+			prefix="$item"
+		fi
+	fi
+
+	if [[ "$exearch" == "" || "$exearch" == "$arch" || "$arch" == "???" ]]; then
+		prefixes_menu+=("FALSE" "${arch}" "${item}")
+		((n++))
+	fi
+done < <(find "$wineprefixes" -mindepth 1 -maxdepth 1 -type d | sort)
+
+if [[ "$prefix" != "" ]]; then # if we have found an entry in an always list bail early
+	return 0
+fi
+
+selection="$(yad --title="Select WINE prefix to execute program!" --width=400 --height=400 --center --grid-lines=vert --on-top --selectable-labels --list --radiolist --buttons-layout=center --button=Cancel:1 --button="Just now":0 --button="Always for this program":200 --button="Create new...":210 --column "Pick" --column "Arch" --column "Prefix" "${prefixes_menu[@]}")"
+ret=$?
+prefix="$(echo "${selection}" | cut -d'|' -f3)"
+
+if [[ "$ret" == "210" ]]; then # user asked to create new prefix
+	selection="$(yad --title="Type in a name for your new WINE prefix!" --width=400 --center --on-top --form --radiolist --buttons-layout=center --field="Don't go overboard with special characters, there is no safety checks here! Space, underscore and similar will work though...":LBL --field=Name --field=Architecture:CB --field="Always run this program in this prefix":CB "" "" 'win32!^win64' "^yes!no")"
+	ret=$?
+	if [[ "$ret" == "0" && "$prefix" == "" ]]; then
+		prefix="$(echo "${selection}" | cut -d'|' -f2)"
+		temp="$(echo "${selection}" | cut -d'|' -f3)" # arch
+		temp2="$(echo "${selection}" | cut -d'|' -f4)" # always
+		dcho "Creating new $temp prefix ${prefix}..."
+		WINEARCH="$temp" WINEPREFIX="${wineprefixes}${prefix}" "$realwine" wineboot
+		[[ "$temp2" == "yes" ]] && ret=200 || ret=0
+	fi
+fi
+
+if [[ "$ret" == "200" ]]; then
+	dcho "User clicked 'always'"
+fi
+
+if [[ "$ret" == "0" || "$ret" == "200" ]]; then
+	if [[ "$prefix" == "" ]]; then
+		dcho "User didn't select a prefix before accepting"
+	else
+		dcho "User selected prefix: ${prefix}"
+		if [[ "$ret" == "200" ]]; then
+			dcho "Saving preference as user asked 'always'"
+			echo "${executable//\\/\/}" >> "${wineprefixes}${prefix}/always.list"
+		fi
+	fi
+else
+	dcho "User hit Cancel or ESC, no prefix was selected"
+fi
+}
+
+#***************************************************************************************************
+# TODO: write winewrap internal functions such as install, update, config, prefix copy/archive/delete, etc
+
+function winewrap()
+{
+true;
+}
+
+#***************************************************************************************************
+#***************************************************************************************************
+
+if [[ "$(which yad)" == "" ]]; then
+	echo "This script requires 'yad' to be installed!" >&2
+	exit 1
+fi
+
+# TODO: autodetect real wine binary path?
+realwine="/opt/wine-stable/bin/wine"
+
+params=()
+unix=0
+while [[ $# -gt 0 ]]; do
+	param="$1"
+	shift
+	if [[ "${param}" == *" "* ]]; then
+		param="${param}"
+	fi
+
+	[[ "${param}" == "/unix" ]] && unix=1 && continue # remember if we are getting a unix path or a windows path
+	[[ "${param}" == "/unix" || "${param}" == "start" ]] && continue # drop '/unix' and 'start'
+
+	params+=( "${param}" )
+done
+
+bname="${0##*/}"
+dcho "Winewrap called as '${bname}' with ${#params[*]} parameter(s): ${params[*]}"
+
+if [[ "$bname" == "winewrap" ]]; then
+	winewrap "${params[@]}"
+	exit $?
+fi
+
+if [[ ! -d "$wineprefixes" ]]; then
+	mkdir "$wineprefixes"
+fi
+
+prefix=""
+if [[ -z "$WINEPREFIX" ]]; then
+	dcho "No WINEPREFIX passed in, trying to figure it out..."
+
+	executable="" # askprefix uses this to check always lists
+	exearch="unknown"
+	n=0
+	for item in "${params[@]}"; do
+
+		# item might be double-quoted from earlier, we need to strip that here (also single quote), so that we can process it properly
+		# TODO: haven't the double-quoting got removed? item is transient here, so probably not damage, but if not needed should be removed...
+		[[ "${item}" == *"\"" || "${item}" == *"'" ]] && item="${item:0:(-1)}"
+		[[ "${item}" == "\""* || "${item}" == "'"* ]] && item="${item:1}"
+
+		# figure out exepath; exepath is used to check if the expected binary is inside a known prefix or not; when invoked real wine the original (potentially relative) path is passed on
+		if [[ "${item,,}" == *".exe" ]]; then
+			executable="${item}"
+			# FIXME: what about windows paths with backslashes???
+			exepath="${item%/*}"
+
+			if [[ "${exepath}" == "." ]]; then # if path started out ./ we can drop the remaining . here...
+				exepath=""
+			fi
+
+			if [[ "${exepath:0:1}" != "/" && "${exepath:1:1}" != ":" ]]; then # not starting with / and not a windows path, assume relative path or no path, prepend pwd
+				# TODO: further check if first char alphanumeric? what is a valid character set for a first letter of a relative path? should we expect (and handle) '~' too? (shell should resolve that, right?); need to test/research
+				dcho "Relative path to executable, prepending current working directory: ${PWD}"
+				exepath="${PWD}/${exepath}"
+			fi
+		fi
+
+		((n++))
+	done
+
+	if [[ -f "${item}" ]]; then
+		fileinfo="$(file "${item}")"
+		[[ "$fileinfo" == *" PE32 executable "* ]] && exearch="win32"
+		[[ "$fileinfo" == *" PE32+ executable "* ]] && exearch="win64"
+		dcho "Executable is a ${exearch} binary"
+	else
+		dcho "Executable not found, can't guess WINEARCH"
+	fi
+
+	[[ "$exearch" == "unknown" || "$exearch" == "win32" ]] && exearch="" # we don't want to leak 'unknown' or 'win32' into askprefix
+
+	if [[ "$unix" == "1" ]]; then # unix path
+		dcho "Exepath is a unix path"
+	else # windows path, only valid inside wine prefix
+		dcho "Exepath is a windows path (or a relative path) FIXME"
+	fi
+
+	if [[ "$exepath" == "$wineprefixes"* ]]; then
+		prefix="${exepath:${#wineprefixes}}"
+		prefix="${prefix%%/*}"
+		dcho "Exepath IS inside a known wine prefix: $prefix"
+	else
+		dcho "Exepath is NOT inside any known wine prefix!"
+		dcho "Checking always lists and/or asking the user to choose a prefix if needed..."
+		askprefix "$exearch"
+	fi
+
+	# TODO: exepath has been "fixed" for relative paths, but we dont currently use it; we are using params[@] instead!
+	[[ "$prefix" == "" ]] && exit 1 # user didn't select a prefix or something else went wrong
+
+	dcho "Running wine: WINEPREFIX=\"${wineprefixes}${prefix}\" $realwine ${params[*]}"
+	dcho "" # force a separating newline at the end of log
+	WINEPREFIX="${wineprefixes}${prefix}" exec $realwine "${params[@]}"
+else
+	dcho "Wineprefix set: $WINEPREFIX"
+	dcho "" # force a separating newline at the end of log
+	exec $realwine "${params[@]}"
+fi
