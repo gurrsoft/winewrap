@@ -2,9 +2,10 @@
 
 me="WineWrap"
 mec="winewrap"
-ver="0.3"
+ver="0.4"
 wineprefixes="${HOME}/.wine_pfxs/"
 logfile="${HOME}/winewrap-debug.log"
+downloadurl="https://github.com/gurrsoft/winewrap/raw/master/winewrap"
 
 #***************************************************************************************************
 
@@ -117,8 +118,43 @@ if [[ "$1" == "--version" ]]; then
 	return 0
 fi
 
+if [[ "$1" == "--check-updates" ]]; then
+	latest="$(download "${downloadurl}" | grep 'ver=')"
+	if [[ "${latest}" == "ver=\""*"\"" ]]; then
+		latest="${latest:5:-1}"
+		echo "Latest available version: ${latest}"
+		if (( $(echo "$latest > $ver" | bc -l) )); then
+			echo "There is an update available, run '${mec} --update' to update it on your system!"
+		else
+			echo "You are running the latest version already."
+		fi
+
+		return 0
+	fi
+
+	echo "Couldn't get the version number for the latest version!"
+	return 1
+fi
+
 echo "Unknown option '${1}'"
 return 1
+}
+
+#***************************************************************************************************
+# IN:
+# 1: url (string) - url to download
+# 2: localpath (string) - optional; local path to save downloaded data to; if omitted content is echoed to stdout
+# OUT:
+# Content of url if input #2 was omitted or empty, nothing otherwise
+# Returns exit code of downloader process
+
+function download()
+{
+local localpath
+
+localpath="${2--}"
+
+wget "$1" -O "${localpath}" 2>/dev/null
 }
 
 #***************************************************************************************************
